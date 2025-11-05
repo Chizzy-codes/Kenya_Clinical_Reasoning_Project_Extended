@@ -1,0 +1,9 @@
+Step 1: Define data requirements for your ML task (domains, source formats, update frequency, volume). - 
+Step 2: Set up web scraping (choose API, browser automation, or hybrid); implement logic for crawling, pagination, and dynamic page rendering. - 
+Step 3: Automate data cleaning, deduplication, type & schema enforcement, and basic validation. - 
+Step 4: Schedule and orchestrate pipeline runs (cron, Airflow, Dagster, Prefect, etc.), set up monitoring/logging. - 
+Step 5: Convert and store output in ML/AI-ready formats or pipelines (vector DBs, S3, SQL, NoSQL, JSON, etc.). - 
+Step 6: Integrate with downstream ML workflows or trigger retraining/batch ingest jobs. - 
+Step 7: (Optional) Add annotation, human validation, or active learning if required for supervised tasks.
+
+Modular architecture

@@ -1,0 +1,121 @@
+This is an excellent and crucial question. When your domain has a rich, specific vocabulary that is not well-represented in the base model's tokenizer, you need to perform an additional, explicit step to teach the model these new words.
+The standard fine-tuning process will not do this automatically. If you don't take action, the tokenizer will break your important domain-specific terms into smaller, often meaningless sub-words, which harms performance.
+The correct procedure involves two critical steps, performed before you start training:
+Add the new tokens to the tokenizer's vocabulary.
+Resize the model's embedding layer to accommodate these new tokens.
+Here is a detailed, step-by-step guide on how to do this correctly.
+Step 1: Identify Your Domain-Specific Vocabulary
+First, you need to create a list of the important new words you want to add. You can gather these from:
+Your training dataset.
+Domain-specific glossaries or textbooks.
+Consulting with domain experts.
+Let's say you identify the following critical terms for your clinical domain that are likely not single tokens in the Qwen2 vocabulary:
+Generated python
+# List of new, important domain-specific words
+new_tokens = [
+    "Hypoalbuminemia", 
+    "Cholecystectomy", 
+    "Thrombocytopenia",
+    "Cardiomyopathy"
+]
+Use code with caution.
+Python
+Best Practice: Focus on high-impact, frequently occurring terms. Don't add thousands of words; start with the most critical few dozen or hundred.
+Step 2: Add Tokens and Resize Embeddings (The Code)
+This is the core technical part. You must perform these actions after loading the base model and tokenizer but before initializing the SFTTrainer.
+Generated python
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+# --- 1. Load the Base Model and Tokenizer ---
+model_id = "Qwen/Qwen2.5-0.5B"
+
+# Use the same QLoRA config as before
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16
+)
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    quantization_config=bnb_config,
+    device_map="auto"
+)
+
+tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+tokenizer.pad_token = tokenizer.eos_token
+
+# --- 2. Add New Tokens to the Tokenizer ---
+print(f"Original vocabulary size: {len(tokenizer)}")
+
+# Add the new tokens to the tokenizer's vocabulary
+num_added_toks = tokenizer.add_tokens(new_tokens)
+
+print(f"Added {num_added_toks} new tokens.")
+print(f"New vocabulary size: {len(tokenizer)}")
+
+# --- 3. Resize the Model's Token Embeddings ---
+# This is a CRUCIAL step.
+# The model's embedding layer must be expanded to match the new vocabulary size.
+model.resize_token_embeddings(len(tokenizer))
+
+# --- 4. Verify (Optional but Recommended) ---
+# Check that the new tokens are now recognized as single entities
+text = "The patient was diagnosed with Cardiomyopathy and Hypoalbuminemia."
+encoded = tokenizer.encode(text)
+decoded = tokenizer.decode(encoded)
+
+print("Encoded IDs:", encoded)
+print("Decoded Text:", decoded)
+# You should see that your new words correspond to single, high-numbered token IDs.
+
+
+Why This Works and What Happens Under the Hood
+New Embeddings: When you call model.resize_token_embeddings(), the model adds new rows to its embedding matrix, one for each new token. These new rows are randomly initialized.
+Learning the Embeddings: During fine-tuning, the model will learn the meaning of these new words from scratch, based on how they are used in your training data. Because the embedding layer is usually part of the target_modules for LoRA (or is trainable by default), these new random embeddings will be updated and will eventually represent the meaning of your domain-specific terms.
+Important Caveats
+Sufficient Data is Key: Since the model is learning the meaning of these new words from zero, you need to ensure they appear frequently and in diverse contexts within your training dataset.
+Impact on Training: This can sometimes make training slightly less stable initially, as the model has to learn these new embeddings. You might need a slightly longer warmup or more training epochs.
+Don't Confuse with Special Tokens: Use tokenizer.add_tokens() for vocabulary words. Use tokenizer.add_special_tokens() only for control tokens like <|im_start|> or [USER], which have special significance in formatting.
+
+
+That is a critical question. The size of your dataset is one of the most important factors for successful fine-tuning.
+The direct answer is: Yes, 400 rows is a very small dataset and it presents a significant challenge, especially since you are adding new vocabulary.
+It is likely to be an issue for two primary reasons:
+High Risk of Overfitting: With only 400 examples, the model can easily memorize the specific prompt -> completion pairs instead of learning the underlying pattern of your task. This means it will perform well on the data it has seen, but will fail to generalize to new, unseen clinical scenarios.
+Insufficient Data to Learn New Vocabulary: Learning the meaning of a new word requires seeing it in many different contexts. With only 400 rows, a new token like "Cardiomyopathy" might only appear a handful of times. This is not enough for the model to learn its rich medical meaning, and the new embeddings for that token will be poorly trained.
+
+
+Solution 2: Adjust Your Training Strategy
+You must fine-tune more carefully to prevent overfitting on your small (but now augmented) dataset.
+a) Train for More Epochs
+Since your dataset is small, the model needs to see each example more times to learn effectively.
+Solution: Instead of the standard 1-3 epochs, train for 5-10 epochs.
+b) Use a Smaller Learning Rate
+With a small dataset, you want to take smaller, more cautious steps during optimization.
+Solution: Lower your learning rate. Instead of 2e-4, try 2e-5. This helps prevent the model from "jumping over" a good solution.
+c) Increase Regularization
+Regularization techniques directly combat overfitting.
+Solution: Slightly increase the weight_decay and lora_dropout parameters in your TrainingArguments and LoraConfig.
+weight_decay=0.01 (in TrainingArguments)
+lora_dropout=0.1 (in LoraConfig, this is a good default but ensure it's set)
+
+
+Solution 3: Re-evaluate Adding New Tokens
+Given the data scarcity, adding new vocabulary is risky.
+Action: Before adding tokens, check if the base tokenizer already handles your words reasonably well.
+Generated python
+# Test this BEFORE adding tokens
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B")
+text = "The patient has Thrombocytopenia."
+print(tokenizer.tokenize(text)) 
+# Result might be [' The', ' patient', ' has', ' Th', 'rom', 'boc', 'yt', 'op', 'enia', '.']
+Use code with caution.
+Python
+If the tokenization is not terrible (i.e., it's not breaking words into single letters), consider this trade-off: It might be better to let the model learn the meaning of the sub-word sequence ([' Th', 'rom', 'boc', '...']) from your augmented dataset, rather than trying to learn a brand new token from scratch with limited data. Try a training run without adding new tokens first.
+A Practical Plan
+Augment First: Use the LLM-based methods to expand your dataset from 400 to at least 2000 rows. This is your highest priority.
+Decide on Vocabulary: Make a pragmatic choice about whether to add new tokens based on the trade-off above.
+Configure for Safety: Create your TrainingArguments with more epochs (e.g., num_train_epochs=5) and a lower learning rate (e.g., learning_rate=2e-5).
+Train and Evaluate: Train the model on your new, larger dataset. Crucially, make sure you have a separate test set (e.g., 50-100 original, hand-crafted examples that the model has never seen) to get a true measure of its performance and check for overfitting.
